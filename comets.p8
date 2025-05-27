@@ -9,6 +9,8 @@ function _init()
 	--disable print() autoscroll
 	poke(0x5f36,0x40)
 
+	enemies_setup()
+
 	--skip intro
 	t=0 init_game() do return end
 
@@ -109,83 +111,136 @@ function _asteroid_update(self)
 		rnd{32,33}
 end
 
-ENEMIES={
-	{ --asteroid 1 (comes straight down)
-		hp=3,
-		update=_asteroid_update,
-	},
-	{ --asteroid 2 (sways)
-		hp=3,
-		score=2,
-		init=function(self)
-			self.start_x,self.start_time,self.period,self.distance=self.x,time(),rnd(1),rnd(20)
-		end,
-		update=function(self)
-			_asteroid_update(self)
-			self.x=self.start_x+sin((time()-self.start_time)*self.period)*self.distance
-		end,
-	},
-	{ --demon
+--need to define ENEMIES global in a function because we need a util function,
+--which won't exist until _init() since lua doesn't hoist.
+--the "__kind" fields are just for debugging, and may be removed if needed.
+function enemies_setup()
+	local DEMON_PROTOTYPE={
+		__kind="red demon",
 		hp=5,
 		score=2,
-		timer=15,
+		timer=15, speed=1,
 		init=function(self)
-			self.target=copy_to(jc)
+			self.target=self:get_new_target()
 		end,
 		update=function(self)
 			if self.target then
 				self.spr=34
-				move_ent_toward_ent(self,self.target,1)
+				move_ent_toward_ent(self,self.target,self.speed)
 				self.timer-=1
 				if self.timer<=0 then
-					self.timer,self.target=15
+					if(self.shoot)self:shoot()
+					self.timer,self.target=15*self.speed
 				end
 			else
 				self.spr=35
 				self.timer-=1
 				if self.timer<=0 then
-					self.timer,self.target=15,copy_to(jc)
+					self.timer,self.target=15,self:get_new_target()
 				end
 			end
 		end,
-	},
-	{ --ufo
-		spr=36, pal={},
+		get_new_target=function()
+			return copy(jc)
+		end,
+	}
+	local DEMON_SHOOTS_PROTOTYPE={
+		__kind="red demon (shoots)",
+		hp=5,
 		score=3,
-		time_until_shoot=60,
+		speed=1.5,
 		update=function(self)
-			self.y+=1
-			self.time_until_shoot-=1
-			if self.time_until_shoot<=0 then
-				self.pal[1]=1
-				self.time_until_shoot=60
-				shot_pal_anim={
-					0b1011111111111111,
-					0b1101111111111111,
-					0b1001111111111111,
-				}
-				add_entity{
-					kind="enemy",
-					x=self.x, y=self.y,
-					spr=37, pal={8,8},
-					score=0,
-					direction=direction_from_ent_to_ent(self,jc),
-					update=function(self)
-						self.x+=self.direction[1]*1.5
-						self.y+=self.direction[2]*1.5
-						self.palt=shot_pal_anim[t\2%3+1]
-					end,
-				}
-			elseif self.time_until_shoot<15 then
-				self.pal[1]=7
+			if self.timer then
+				self.spr=35
+				self.y+=1
+				self.timer-=1
+				if self.timer<=0 then
+					self.timer=nil
+				end
+			else
+				self.spr=34
+				self.y+=self.speed
+				if self:shoot() then
+					self.timer=15*self.speed
+				end
 			end
 		end,
-	},
-}
+		shoot=function(self)
+			if abs(self.y-jc.y)<16 then
+				for x in all{-1,1} do
+					shoot(self.x,self.y, {x,0.5})
+				end
+				return true
+			end
+		end,
+	}
+	local DEMON_BLUE_PARTS={
+		hp=3,
+		pal={[8]=12,[2]=10},
+		speed=2,
+	}
+
+	ENEMIES={
+		{ --asteroid 1 (comes straight down)
+			hp=3,
+			update=_asteroid_update,
+		},
+		{ --asteroid 2 (sways)
+			hp=3,
+			score=2,
+			init=function(self)
+				self.start_x,self.start_time,self.period,self.distance=self.x,time(),rnd(1),rnd(20)
+			end,
+			update=function(self)
+				_asteroid_update(self)
+				self.x=self.start_x+sin((time()-self.start_time)*self.period)*self.distance
+			end,
+		},
+		DEMON_PROTOTYPE, --red demon
+		copy(DEMON_PROTOTYPE,DEMON_BLUE_PARTS,{ --blue demon
+			__kind="blue demon",
+		}),
+		{ --ufo
+			spr=36, pal={},
+			score=3,
+			time_until_shoot=60,
+			update=function(self)
+				self.y+=1
+				self.time_until_shoot-=1
+				if self.time_until_shoot<=0 then
+					self.pal[1]=1
+					self.time_until_shoot=60
+					shoot(self.x,self.y,direction_from_ent_to_ent(self,jc))
+				elseif self.time_until_shoot<15 then
+					self.pal[1]=7
+				end
+			end,
+		},
+		DEMON_SHOOTS_PROTOTYPE, --red demon (shoots)
+		copy(DEMON_SHOOTS_PROTOTYPE,DEMON_BLUE_PARTS,{ --blue demon (shoots)
+			__kind="blue demon (shoots)",
+			shoot=function(self)
+				local y_dif=jc.y-self.y
+				if
+					y_dif>-8 and y_dif<64
+					or y_dif<0 and abs(self.x-jc.x)<16
+				then
+					for x in all{-1,1} do
+						shoot(self.x,self.y, {x,1})
+					end
+					shoot(self.x,self.y, {0,-1})
+					return true
+				end
+			end,
+		}),
+	}
+end
 
 ENEMY_PROBABILITIES={
-	-- split"0.5,0.8,1",
-	split"0.2,0.5,0.8,1",
+	-- split"0.5,0.8,-1,1",
+	-- split"0.2,0.5,0.8,-1,1",
+	-- split"0.6,-1,0.8,1,-1",
+	split"0.6,-1,0.7,0.8,-1,0.9,1",
 }
 
 function update_game()
@@ -218,7 +273,7 @@ function update_game()
 			end
 		end
 		assert(enemy_prototype,"missed a probability?")
-		local enemy=add_entity(copy_to(enemy_prototype,{
+		local enemy=add_entity(copy(enemy_prototype,{
 			kind="enemy",
 			x=ENTITY_MAX_LEFT+rnd(ENTITY_MAX_RIGHT-ENTITY_MAX_LEFT),
 			y=-8,
@@ -321,6 +376,26 @@ function add_entity(props)
 	}),props)
 end
 
+function shoot(x,y,direction)
+	SHOT_PAL_ANIM={
+		0b1011111111111111,
+		0b1101111111111111,
+		0b1001111111111111,
+	}
+	add_entity{
+		kind="enemy",
+		x=x, y=y,
+		spr=37, pal={8,8},
+		score=0,
+		direction=direction,
+		update=function(self)
+			self.x+=self.direction[1]*1.5
+			self.y+=self.direction[2]*1.5
+			self.palt=SHOT_PAL_ANIM[t\2%3+1]
+		end,
+	}
+end
+
 --returns true if the two entities are overlapping and both are vulnerable.
 function entcol(a,b)
 	return a.invuln_time_left==0 and b.invuln_time_left==0
@@ -336,7 +411,9 @@ end
 function direction_from_ent_to_ent(a,b)
 	local x,y=b.x-a.x,b.y-a.y
 	--normalize vector.
-	local len=sqrt(x*x+y*y)
+	--numbers are small! but numbers are big!! need to shift them so they less big!!!!!
+	local len=sqrt((x>>4)^2+(y>>4)^2)<<4
+	if(len==0)return {0,0}
 	x/=len
 	y/=len
 	return {x,y}
@@ -362,11 +439,18 @@ function lerp(from,to,amt)
 	return from+(to-from)*amt
 end
 
-function copy_to(tbl,props)
-	for k,v in pairs(props) do
-		tbl[k]=v
+function copy(...)
+	local dest={}
+	for src in all({...}) do
+		copy_to(dest,src)
 	end
-	return tbl
+	return dest
+end
+function copy_to(dest,src)
+	for k,v in pairs(src) do
+		dest[k]=v
+	end
+	return dest
 end
 
 function log(msg)
