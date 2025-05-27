@@ -1,6 +1,8 @@
 pico-8 cartridge // http://www.pico-8.com
 version 42
 __lua__
+SCORE_SHIFT=16
+
 function _init()
 	--reset log
 	printh("-- start --","log.txt",true)
@@ -94,21 +96,20 @@ function init_game()
 	}
 end
 
-function _asteroid_update(self)
-	self.y+=1
-	self.flip_x,self.flip_y, self.spr=
-		rnd{false,true},rnd{false,true},
-		rnd{32,33}
-end
-
 --need to define ENEMIES global in a function because we need a util function,
 --which won't exist until _init() since lua doesn't hoist.
 --the "__kind" fields are just for debugging, and may be removed if needed.
 function enemies_setup()
+	local function asteroid_update(self)
+		self.y+=1
+		self.flip_x,self.flip_y, self.spr=
+			rnd{false,true},rnd{false,true},
+			rnd{32,33}
+	end
 	local DEMON_PROTOTYPE={
 		__kind="red demon",
 		hp=5,
-		score=2,
+		score=2>>SCORE_SHIFT,
 		timer=15, speed=1,
 		init=function(self)
 			self.target=self:get_new_target()
@@ -137,7 +138,7 @@ function enemies_setup()
 	local DEMON_SHOOTS_PROTOTYPE={
 		__kind="red demon (shoots)",
 		hp=5,
-		score=3,
+		score=3>>SCORE_SHIFT,
 		speed=1.5,
 		update=function(self)
 			if self.timer then
@@ -173,16 +174,16 @@ function enemies_setup()
 	ENEMIES={
 		{ --asteroid 1 (comes straight down)
 			hp=3,
-			update=_asteroid_update,
+			update=asteroid_update,
 		},
 		{ --asteroid 2 (sways)
 			hp=3,
-			score=2,
+			score=2>>SCORE_SHIFT,
 			init=function(self)
 				self.start_x,self.start_time,self.period,self.distance=self.x,time(),rnd(1),rnd(20)
 			end,
 			update=function(self)
-				_asteroid_update(self)
+				asteroid_update(self)
 				self.x=self.start_x+sin((time()-self.start_time)*self.period)*self.distance
 			end,
 		},
@@ -192,7 +193,7 @@ function enemies_setup()
 		}),
 		{ --ufo
 			spr=36, pal={},
-			score=3,
+			score=3>>SCORE_SHIFT,
 			time_until_shoot=60,
 			update=function(self)
 				self.y+=1
@@ -291,7 +292,7 @@ function update_game()
 					if ent.hp>0 then
 						ent.white_until_t=t+2
 					else
-						score+=ent.score or 1
+						score+=ent.score or 1>>SCORE_SHIFT
 						del(entities,ent)
 						explode_at(ent.x,ent.y)
 					end
@@ -319,7 +320,9 @@ ENTITY_MAX_LEFT,ENTITY_MAX_RIGHT=4,124
 function draw_game()
 	cls(0)
 	draw_stars()
-	print(sub("000000"..score,-6).."0", 0,0, 7)
+	local txt=tostr(score,0x2).."0"
+	while(#txt<6)txt="0"..txt
+	print(txt, 0,0, 7)
 	foreach(entities,_draw_ent)
 	_draw_ent(jc)
 	for exp in all(explosions) do
