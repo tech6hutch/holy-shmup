@@ -88,7 +88,7 @@ function init_game()
 		stars={}
 		generate_stars()
 	end
-	entities,explosions={},{}
+	entities,explosions,popups={},{},{}
 	entity_spawn_t,no_shoot_until_t=t+90,0
 	jc=add_entity{
 		x=64,y=64,
@@ -292,7 +292,7 @@ function update_game()
 					if ent.hp>0 then
 						ent.white_until_t=t+2
 					else
-						score+=ent.score or 1>>SCORE_SHIFT
+						add_score(ent.score or 1>>SCORE_SHIFT,ent.x,ent.y)
 						del(entities,ent)
 						explode_at(ent.x,ent.y)
 					end
@@ -300,9 +300,8 @@ function update_game()
 				end
 			end
 			if entcol(ent,jc) then
-				jc.invuln_time_left, score=
-					30,
-					max(score-100,0)
+				add_score(-(100>>16),jc.x,jc.y)
+				jc.invuln_time_left=30
 				explode_at(jc.x,jc.y,10)
 			end
 		end
@@ -330,6 +329,13 @@ function draw_game()
 		exp.r*=0.8
 		if exp.r<1 then
 			del(explosions,exp)
+		end
+	end
+	for popup in all(popups) do
+		print(popup.msg, popup.x,popup.y, 7)
+		popup.timer-=1
+		if popup.timer<=0 then
+			del(popups,popup)
 		end
 	end
 end
@@ -410,6 +416,7 @@ end
 --vfx
 STAR_COLORS={1,1,1,5,5,6}
 STAR_SPEEDS={0.125,[5]=0.25,[6]=0.5}
+
 function generate_stars()
 	for i=1,100 do
 		add(stars,{
@@ -436,6 +443,15 @@ function explode_at(x,y,r)
 	return add(explosions,{
 		x=x, y=y,
 		r=r or 4,
+	})
+end
+
+function add_score(addition,popup_x,popup_y)
+	score=max(score+addition,0) --bcuz negative numbers
+	add(popups,{
+		x=popup_x, y=popup_y,
+		timer=30,
+		msg=tostr(addition,0x2)..(addition==0 and "" or "0"),
 	})
 end
 
