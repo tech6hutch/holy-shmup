@@ -59,7 +59,7 @@ function intro()
 		rectfill(0,y1,127,y2,c)
 	end
 	fillp()
-	_draw_stars(true)
+	draw_stars(true)
 	foreach(entities,_draw_ent)
 	if t>=320 then
 	elseif t>=210 then
@@ -92,16 +92,6 @@ function init_game()
 		x=64,y=64,
 		preserve_offscreen=true,
 	}
-end
-
-function generate_stars()
-	for i=1,100 do
-		STAR_COLORS={1,1,1,5,5,6}
-		add(stars,{
-			x=rnd(128), y=rnd(128)+star_spawn_y,
-			c=rnd(STAR_COLORS)
-		})
-	end
 end
 
 function _asteroid_update(self)
@@ -328,7 +318,7 @@ ENTITY_MAX_LEFT,ENTITY_MAX_RIGHT=4,124
 
 function draw_game()
 	cls(0)
-	_draw_stars()
+	draw_stars()
 	print(sub("000000"..score,-6).."0", 0,0, 7)
 	foreach(entities,_draw_ent)
 	_draw_ent(jc)
@@ -338,17 +328,6 @@ function draw_game()
 		if exp.r<1 then
 			del(explosions,exp)
 		end
-	end
-end
-
-function _draw_stars(keep_still)
-	pal()
-	for star in all(stars) do
-		if(not keep_still)star.y+=1
-		if star.y>star_spawn_y+128 then
-			star.x,star.y=rnd(128),star_spawn_y-1
-		end
-		pset(star.x,star.y,star.c)
 	end
 end
 
@@ -426,6 +405,30 @@ end
 
 -->8
 --vfx
+STAR_COLORS={1,1,1,5,5,6}
+STAR_SPEEDS={0.125,[5]=0.25,[6]=0.5}
+function generate_stars()
+	for i=1,100 do
+		add(stars,{
+			x=rnd(128), y=flr(rnd(128))+star_spawn_y,
+			c=rnd(STAR_COLORS)
+		})
+	end
+end
+
+function draw_stars(keep_still)
+	pal()
+	for star in all(stars) do
+		if not keep_still then
+			star.y+=STAR_SPEEDS[star.c]
+		end
+		if star.y>star_spawn_y+128 then
+			star.x,star.y=rnd(128),star_spawn_y-1
+		end
+		pset(star.x,star.y,star.c)
+	end
+end
+
 function explode_at(x,y,r)
 	return add(explosions,{
 		x=x, y=y,
