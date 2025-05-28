@@ -20,7 +20,7 @@ function _init()
 	t=0 init_game() do return end
 
 	_update,_draw=intro
-	t,entities,stars,star_spawn_y,star_speed_scale=0,{},{},-300-64,1
+	t,entities,stars,star_spawn_y,star_speed_scale,kolob=0,{},{},-300-64,1
 	generate_stars()
 	jc=add_entity{
 		x=64,y=64,
@@ -80,7 +80,7 @@ function intro()
 end
 
 function init_game()
-	_update,_draw,score,level=update_game,draw_game,0,0
+	_update,_draw,score,level=update_game,draw_game,0,7
 	local star_spawn_offset=0-(star_spawn_y or 0)
 	star_spawn_y=0
 	if stars then
@@ -118,7 +118,7 @@ function enemies_setup()
 	local DEMON_PROTOTYPE={
 		__kind="red demon",
 		hp=5,
-		score=2>>SCORE_SHIFT,
+		score=2,
 		timer=15, speed=1,
 		init=function(self)
 			self.target=self:get_new_target()
@@ -147,7 +147,7 @@ function enemies_setup()
 	local DEMON_SHOOTS_PROTOTYPE={
 		__kind="red demon (shoots)",
 		hp=5,
-		score=3>>SCORE_SHIFT,
+		score=3,
 		speed=1.5,
 		update=function(self)
 			if self.timer then
@@ -187,7 +187,7 @@ function enemies_setup()
 		},
 		{ --asteroid 2 (sways)
 			hp=3,
-			score=2>>SCORE_SHIFT,
+			score=2,
 			init=function(self)
 				self.start_x,self.start_time,self.period,self.distance=self.x,time(),rnd(1),rnd(20)
 			end,
@@ -202,7 +202,7 @@ function enemies_setup()
 		}),
 		{ --ufo
 			spr=36, pal={},
-			score=3>>SCORE_SHIFT,
+			score=3,
 			time_until_shoot=60,
 			update=function(self)
 				self.y+=1
@@ -240,21 +240,31 @@ end
 ENEMY_PROBABILITIES={
 	--asteroid, +swaying, red, blue, ufo, red(shoot), blue(shoot).
 	--checked left to right. must have a 1 (100% chance⁘). use -1 for 0% chance.
-	-- split"0.5,0.8,-1,1",
-	-- split"0.2,0.5,0.8,-1,1",
-	-- split"0.6,-1,0.8,1,-1",
-	split"0.6,-1,0.7,0.8,-1,0.9,1",
+	split"0.8,1", --just asteroids
+	split"0.4,0.8,1", --asteroids and reds
+	split"0.4,0.6,0.8,0.9,1", --asteroids, reds, blues, and ufos
+	split"0.5,-1,0.8,-1,-1,1", --asteroids and reds (+shooting)
+	split"0.8,-1,-1,-1,-1,0.9,1", --asteroids, shooting reds/blues
+	split"0.6,-1,0.7,0.8,-1,0.9,1", --asteroids, reds/blues (+shooting)
+	split"0.4,-1,-1,-1,0.5,0.75,1", --asteroids, shooting reds/blues, ufos
+	split"-1,-1,-1,-1,1", --oops all ufos
 }
 --⁘ technically, 100% chance would be whatever number is immediately below 1.0
 --  in the 32-bit fixed-point numbering system that pico-8 uses, but it doesn't
 --  matter.
-for i=1,#ENEMY_PROBABILITIES do
-	assert(#ENEMY_PROBABILITIES[i]==7, (
-		#ENEMY_PROBABILITIES[i]<7
-		and "missing probabilities for level "
-		or "too many probabilities for level "
-	)..i)
+for lvl,probs in pairs(ENEMY_PROBABILITIES) do
+	assert(#probs<=7,
+		"too many probabilities for level "..lvl)
+	for i=#probs,1,-1 do
+		if probs[i]!=-1 then
+			assert(probs[i]==1,
+				"level "..lvl.."'s probabilities don't end with 1 (for 100% chance)")
+			break
+		end
+	end
 end
+
+LAST_LEVEL=#ENEMY_PROBABILITIES+1
 
 function update_game()
 	t+=1
@@ -286,30 +296,55 @@ function update_game()
 		)
 		if(level_warp_t==t)init_next_level()
 	else
-		if t>=level_soft_end_t then
+		if t>=level_soft_end_t and level!=LAST_LEVEL then
 			local enemy_count=0
 			for ent in all(entities) do
 				if(ent.kind=="enemy")enemy_count+=1
 			end
 			if enemy_count==0 then
 				level_warp_t=t+WARP_LENGTH
+				add_score(level*100,jc.x,jc.y)
 			end
 		elseif t==entity_spawn_t then
-			local randnum,enemy_prototype=rnd(1)
-			for i=1,#ENEMY_PROBABILITIES[level] do
-				if randnum<=ENEMY_PROBABILITIES[level][i] then
-					enemy_prototype=ENEMIES[i]
-					break
+			if level==LAST_LEVEL then
+				kolob=add_entity{
+					x=64, y=-64,
+					spr=-1, preserve_offscreen=true,
+					start_time=t,
+					update=function(self)
+						--allow the player to speed it up a bit.
+						local dist_past=max(self.y,16)-jc.y
+						if dist_past>0 then
+							self.y+=dist_past
+							if jc.y<self.y then
+								jc.y=self.y
+							end
+						end
+						self.sy=(t-self.start_time)/60
+						if self.y>=63 then
+							self.y,self.sy,self.update=63,0
+							draw_game()
+							end_game()
+						end
+					end,
+				}
+			else
+				local randnum,enemy_prototype=rnd(1)
+				for i=1,#ENEMY_PROBABILITIES[level] do
+					if randnum<=ENEMY_PROBABILITIES[level][i] then
+						enemy_prototype=ENEMIES[i]
+						break
+					end
 				end
+				assert(enemy_prototype,"missed a probability?")
+				local enemy=add_entity(copy(enemy_prototype,{
+					kind="enemy",
+					x=ENTITY_MAX_LEFT+rnd(ENTITY_MAX_RIGHT-ENTITY_MAX_LEFT),
+					y=-8,
+				}))
+				if(enemy.init)enemy:init()
+				entity_spawn_t=t+10+flr(rnd(20))
 			end
-			assert(enemy_prototype,"missed a probability?")
-			local enemy=add_entity(copy(enemy_prototype,{
-				kind="enemy",
-				x=ENTITY_MAX_LEFT+rnd(ENTITY_MAX_RIGHT-ENTITY_MAX_LEFT),
-				y=-8,
-			}))
-			if(enemy.init)enemy:init()
-			entity_spawn_t=t+10+flr(rnd(20))
 		end
 	end
 
@@ -332,7 +367,7 @@ function update_game()
 					if ent.hp>0 then
 						ent.white_until_t=t+2
 					else
-						add_score(ent.score or 1>>SCORE_SHIFT,ent.x,ent.y)
+						add_score(ent.score or 1,ent.x,ent.y)
 						del(entities,ent)
 						explode_at(ent.x,ent.y)
 					end
@@ -340,7 +375,7 @@ function update_game()
 				end
 			end
 			if entcol(ent,jc) then
-				add_score(-(100>>16),jc.x,jc.y)
+				add_score(-100,jc.x,jc.y)
 				jc.invuln_time_left=30
 				explode_at(jc.x,jc.y,10)
 			end
@@ -360,15 +395,14 @@ function draw_game()
 	--bg
 	cls(0)
 	draw_stars()
+	_draw_kolob()
 
 	--hud
-	local score_text=tostr(score,0x2).."0"
-	while(#score_text<6)score_text="0"..score_text
-	print(score_text, 0,0, 7)
+	print(_get_score_text(), 0,0, 7)
 	if t<=level_warp_t then
 		local level_text="level "..level+1
-		print(level_text, 64-#level_text*2,60)
-	elseif t>=level_soft_end_t then
+		print_center(level_text,60)
+	elseif t>=level_soft_end_t and level!=LAST_LEVEL then
 		local warp_text="clear all to warp"
 		print(warp_text, 128-#warp_text*4,0)
 	end
@@ -394,7 +428,45 @@ function draw_game()
 	end
 end
 
+function end_game()
+	_update,_draw=ending
+	end_timer=0
+end
+
+function ending()
+	end_timer+=1
+
+	--bg
+	cls(0)
+	if end_timer<130 then
+		draw_stars(true)
+		_draw_kolob()
+	end
+
+	--entities
+	if(end_timer<115)_draw_ent(jc)
+
+	--end text
+	if end_timer<100 then
+		print_center("finish",52, 0)
+		if end_timer>60 then
+			end_timer=100
+		end
+	end
+
+	if end_timer>=160 then
+		print_center("thus ascended jesus.",36, 7)
+		print_center("the end",44, 7)
+		print_center("final score: ".._get_score_text(),60)
+		print_center("time: ".._get_time_text(),68)
+		if _press_to"reset" then
+			extcmd"reset"
+		end
+	end
+end
+
 function _draw_ent(ent)
+	if(ent.spr<0)return
 	if (ent.invuln_time_left>0 and t%2==0) or ent.white_until_t>=t then
 		--flashing effect
 		for c=0,15 do pal(c,7) end
@@ -403,6 +475,43 @@ function _draw_ent(ent)
 	end
 	palt(ent.palt or 0b1000000000000000)
 	spr(ent.spr, ent.x-4,ent.y-4, 1,1, ent.flip_x,ent.flip_y)
+end
+
+function _draw_kolob()
+	if kolob then
+		local frame=t\2%3
+		circfill(kolob.x,kolob.y, 64, 5)
+		circfill(kolob.x,kolob.y, frame==0 and 60 or 62, 6)
+		circfill(kolob.x,kolob.y, frame==2 and 60 or 58, 7)
+	end
+end
+
+function _get_score_text()
+	local score_text=tostr(score,0x2).."0"
+	while(#score_text<6)score_text="0"..score_text
+	return score_text
+end
+
+function _get_time_text()
+	local frames=t
+	local secs=t\30
+	frames-=secs*30
+	local mins=secs\60
+	secs-=mins*60
+	local hrs=mins\60
+	mins-=hrs*60
+	if(mins<10)mins="0"..mins
+	if(secs<10)secs="0"..secs
+	frames*=10
+	frames\=3
+	if(frames<10)frames="0"..frames
+	return hrs..":"..mins..":"..secs.."."..frames
+end
+
+function _press_to(what)
+	print_center("press anything",84)
+	print_center("to "..what,92)
+	return btnp(🅾️) or btnp(❎)
 end
 
 -->8
@@ -512,16 +621,24 @@ function explode_at(x,y,r)
 end
 
 function add_score(addition,popup_x,popup_y)
-	score=max(score+addition,0) --bcuz negative numbers
+	--addition can be negative.
+	--see SCORE_SHIFT for an explanation of the shift.
+	score=max(score+(addition>>SCORE_SHIFT),0)
 	add(popups,{
 		x=popup_x, y=popup_y,
 		timer=30,
-		msg=tostr(addition,0x2)..(addition==0 and "" or "0"),
+		msg=addition..(addition==0 and "" or "0"),
 	})
 end
 
 -->8
 --util
+
+--doesn't handle full-width chars (i.e., 8px wide instead of 4px).
+function print_center(s,...)
+	print(s,64-#s*2,...)
+end
+
 function lerp(from,to,amt)
 	return from+(to-from)*amt
 end
