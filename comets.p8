@@ -1,6 +1,9 @@
 pico-8 cartridge // http://www.pico-8.com
 version 42
 __lua__
+--numbers only have 16 bits for the integer part, but shifting the value right
+--by 16 lets us also use the remaining bits, intended for the decimal part. This
+--gives us a total of 32 bits for storing our (signed) integer.
 SCORE_SHIFT=16
 
 function _init()
@@ -17,7 +20,7 @@ function _init()
 	t=0 init_game() do return end
 
 	_update,_draw=intro
-	t,entities,stars,star_spawn_y=0,{},{},-300-64
+	t,entities,stars,star_spawn_y,star_speed_scale=0,{},{},-300-64,1
 	generate_stars()
 	jc=add_entity{
 		x=64,y=64,
@@ -77,7 +80,7 @@ function intro()
 end
 
 function init_game()
-	_update,_draw,score=update_game,draw_game,0
+	_update,_draw,score,level=update_game,draw_game,0,0
 	local star_spawn_offset=0-(star_spawn_y or 0)
 	star_spawn_y=0
 	if stars then
@@ -89,11 +92,17 @@ function init_game()
 		generate_stars()
 	end
 	entities,explosions,popups={},{},{}
-	entity_spawn_t,no_shoot_until_t=t+90,0
 	jc=add_entity{
 		x=64,y=64,
 		preserve_offscreen=true,
 	}
+	init_next_level()
+end
+
+function init_next_level()
+	level+=1
+	star_speed_scale=1
+	level_warp_t,level_soft_end_t,entity_spawn_t,no_shoot_until_t=0,t+30*5,t+90,0
 end
 
 --need to define ENEMIES global in a function because we need a util function,
@@ -227,12 +236,25 @@ function enemies_setup()
 	}
 end
 
+--per level.
 ENEMY_PROBABILITIES={
+	--asteroid, +swaying, red, blue, ufo, red(shoot), blue(shoot).
+	--checked left to right. must have a 1 (100% chance⁘). use -1 for 0% chance.
 	-- split"0.5,0.8,-1,1",
 	-- split"0.2,0.5,0.8,-1,1",
 	-- split"0.6,-1,0.8,1,-1",
 	split"0.6,-1,0.7,0.8,-1,0.9,1",
 }
+--⁘ technically, 100% chance would be whatever number is immediately below 1.0
+--  in the 32-bit fixed-point numbering system that pico-8 uses, but it doesn't
+--  matter.
+for i=1,#ENEMY_PROBABILITIES do
+	assert(#ENEMY_PROBABILITIES[i]==7, (
+		#ENEMY_PROBABILITIES[i]<7
+		and "missing probabilities for level "
+		or "too many probabilities for level "
+	)..i)
+end
 
 function update_game()
 	t+=1
@@ -255,22 +277,40 @@ function update_game()
 		no_shoot_until_t=t+5
 	end
 
-	if t==entity_spawn_t then
-		local randnum,enemy_prototype=rnd(1)
-		for i=1,#ENEMY_PROBABILITIES[1] do
-			if randnum<=ENEMY_PROBABILITIES[1][i] then
-				enemy_prototype=ENEMIES[i]
-				break
+	WARP_LENGTH=180
+	WARP_PEAK=WARP_LENGTH-160
+	if level_warp_t>=t then
+		star_speed_scale=max(
+			star_speed_scale*((level_warp_t-t)>=WARP_PEAK and 1.05 or 0.5),
+			0.5
+		)
+		if(level_warp_t==t)init_next_level()
+	else
+		if t>=level_soft_end_t then
+			local enemy_count=0
+			for ent in all(entities) do
+				if(ent.kind=="enemy")enemy_count+=1
 			end
+			if enemy_count==0 then
+				level_warp_t=t+WARP_LENGTH
+			end
+		elseif t==entity_spawn_t then
+			local randnum,enemy_prototype=rnd(1)
+			for i=1,#ENEMY_PROBABILITIES[level] do
+				if randnum<=ENEMY_PROBABILITIES[level][i] then
+					enemy_prototype=ENEMIES[i]
+					break
+				end
+			end
+			assert(enemy_prototype,"missed a probability?")
+			local enemy=add_entity(copy(enemy_prototype,{
+				kind="enemy",
+				x=ENTITY_MAX_LEFT+rnd(ENTITY_MAX_RIGHT-ENTITY_MAX_LEFT),
+				y=-8,
+			}))
+			if(enemy.init)enemy:init()
+			entity_spawn_t=t+10+flr(rnd(20))
 		end
-		assert(enemy_prototype,"missed a probability?")
-		local enemy=add_entity(copy(enemy_prototype,{
-			kind="enemy",
-			x=ENTITY_MAX_LEFT+rnd(ENTITY_MAX_RIGHT-ENTITY_MAX_LEFT),
-			y=-8,
-		}))
-		if(enemy.init)enemy:init()
-		entity_spawn_t=t+10+flr(rnd(20))
 	end
 
 	for ent in all(entities) do
@@ -317,13 +357,27 @@ end
 ENTITY_MAX_LEFT,ENTITY_MAX_RIGHT=4,124
 
 function draw_game()
+	--bg
 	cls(0)
 	draw_stars()
-	local txt=tostr(score,0x2).."0"
-	while(#txt<6)txt="0"..txt
-	print(txt, 0,0, 7)
+
+	--hud
+	local score_text=tostr(score,0x2).."0"
+	while(#score_text<6)score_text="0"..score_text
+	print(score_text, 0,0, 7)
+	if t<=level_warp_t then
+		local level_text="level "..level+1
+		print(level_text, 64-#level_text*2,60)
+	elseif t>=level_soft_end_t then
+		local warp_text="clear all to warp"
+		print(warp_text, 128-#warp_text*4,0)
+	end
+
+	--entities
 	foreach(entities,_draw_ent)
 	_draw_ent(jc)
+
+	--vfx
 	for exp in all(explosions) do
 		circfill(exp.x-exp.r\2,exp.y-exp.r\2, exp.r, 7)
 		exp.r*=0.8
@@ -429,13 +483,24 @@ end
 function draw_stars(keep_still)
 	pal()
 	for star in all(stars) do
+		local old_y=flr(star.y)
 		if not keep_still then
-			star.y+=STAR_SPEEDS[star.c]
+			star.y+=STAR_SPEEDS[star.c]*star_speed_scale
 		end
-		if star.y>star_spawn_y+128 then
-			star.x,star.y=rnd(128),star_spawn_y-1
+		line(
+			star.x, flr(star.y)>old_y and old_y+1 or star.y,
+			star.x, star.y,
+			star.c
+		)
+		while star.y>star_spawn_y+128 do
+			star.y-=128
+			star.x=rnd(128)
+			line(
+				star.x, star_spawn_y,
+				star.x, star.y,
+				star.c
+			)
 		end
-		pset(star.x,star.y,star.c)
 	end
 end
 

@@ -1,0 +1,1 @@
+- Simplify the star system by moving everything in the intro down, so it scrolls up to 0,0. It's not just 300 (since the player ends up at y=-300), but also half the screen (since the camera is centered on the player), so 363 or 364, probably.
