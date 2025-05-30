@@ -102,7 +102,11 @@ end
 function init_next_level()
 	level+=1
 	star_speed_scale=1
-	level_warp_t,level_soft_end_t,entity_spawn_t,no_shoot_until_t=0,t+30*5,t+90,0
+	--todo: change level_soft_end_t to 30*20 (20secs) in the default case.
+	level_warp_t, level_soft_end_t,entity_spawn_t, no_shoot_until_t=
+		0,
+		t+(level==LAST_LEVEL-1 and 91 or 30*5), t+90,
+		0
 end
 
 --need to define ENEMIES global in a function because we need a util function,
@@ -233,12 +237,174 @@ function enemies_setup()
 				end
 			end,
 		}),
+		{ --boss
+			__kind="boss",
+			spr=42, spr_layout="2x2",
+			hp=20, max_hp=20,
+			score=50,
+			invuln_time_on_hit=5,
+			ignore_damage=true,
+			action="descend", timer=30,
+			heads={},
+			--palettes: 14,8; 10;11
+			init=function(self)
+				boss,self.x=self,63
+			end,
+			update=function(self)
+				self.timer-=1
+				local this_action,this_timer=self.action,self.timer
+				if this_action=="descend" then
+					self.y+=1
+					if self.y>=63 then
+						self.y=63
+						self.action,self.timer="spawn heads",30
+					end
+				elseif this_action=="spawn heads" then
+					if this_timer==29 then
+						self.heads={}
+						BOSS_HEAD_STARTING_OFFSET_X,
+						BOSS_HEAD_STARTING_OFFSET_Y=
+							split"4,0,0,0,0,0,-4",
+							split"20,32,40,48,40,32,20"
+						for i=0,6 do
+							add(self.heads,make_entity{
+								kind="enemy",
+								x=self.x-52+16*i+BOSS_HEAD_STARTING_OFFSET_X[i+1], y=self.y-BOSS_HEAD_STARTING_OFFSET_Y[i+1],
+								spr=38, palt=0b0000000000000001,
+								hp=5,
+								segments_to_draw=1,
+							})
+						end
+					elseif this_timer>0 and this_timer%3==0 then
+						for head in all(self.heads) do
+							head.segments_to_draw+=1
+							if head.segments_to_draw>7 then
+								head.segments_to_draw-=1
+								if(count(entities,head)==0)add(entities,head)
+							end
+						end
+					elseif this_timer==0 then
+						self.action,self.timer="heads shoot",45
+					end
+				elseif this_action=="move heads" then
+					for head in all(self.heads) do
+						head.start_x,head.start_y, head.target_x,head.target_y, head.spr=
+							head.x,head.y,
+							8+rnd(112),16+rnd(64),
+							41
+						head.flip_x=head.target_x<head.x
+					end
+					self.action,self.timer="move heads 2",45
+					self:update_dead_heads()
+				elseif this_action=="move heads 2" then
+					if this_timer==0 then
+						self.action,self.timer="heads shoot",30
+					else
+						for head in all(self.heads) do
+							if this_timer>=15 then
+								head.x,head.y=
+									lerp(head.target_x,head.start_x,(this_timer-15)/30),
+									lerp(head.target_y,head.start_y,(this_timer-15)/30)
+							else
+								head.spr=38
+							end
+						end
+					end
+					self:update_dead_heads()
+				elseif this_action=="heads shoot" then
+					if this_timer==0 then
+						self.action="move heads"
+					else
+						for head in all(self.heads) do
+							if this_timer==29 then
+								head.spr=39
+							elseif this_timer==27 then
+								head.spr=40
+							elseif this_timer==25 and head.hp>0 then
+								shoot(head.x,head.y,direction_from_ent_to_ent(head,jc),true)
+							elseif this_timer<12 then
+								head.spr=this_timer==11 and 39 or 38
+							end
+						end
+					end
+					self:update_dead_heads()
+				elseif this_action=="open eye" then
+					if this_timer==20 then
+						star_color_override, self.spr_layout_use_next_for_lower,self.ignore_damage=
+							{2,[5]=5,[6]=8}, true
+					elseif this_timer==10 then
+						self.spr,self.spr_layout_use_next_for_lower=43
+					elseif this_timer==0 then
+						self.action,self.timer="eye wait",30
+					end
+				elseif this_action=="close eye" then
+					if this_timer==20 then
+						self.spr,self.spr_layout_use_next_for_lower=42,true
+					elseif this_timer==10 then
+						self.ignore_damage,self.spr_layout_use_next_for_lower, star_color_override=
+							true
+					elseif this_timer==0 then
+						self.action,self.timer="spawn heads",30
+					end
+				elseif this_action=="eye shoot" then
+					if this_timer%3==0 then
+						local lookahead={
+							x=jc.x+jc.sx*30,
+							y=jc.y+jc.sy*30,
+						}
+						shoot(self.x,self.y,direction_from_ent_to_ent(self,lookahead),true)
+					end
+					if this_timer==0 then
+						self.action,self.timer="eye wait",30
+					end
+				elseif this_action=="eye wait" then
+					if this_timer==0 then
+						if rnd(20)<self.hp then
+							self.action,self.timer="eye shoot",60
+						else
+							self.action,self.timer="close eye",30
+						end
+					end
+				end
+			end,
+			update_dead_heads=function(self)
+				for head in all(self.heads) do
+					if t%3==0 and head.hp<=0 then
+						head.segments_to_draw-=1
+						if head.segments_to_draw<=0 then
+							del(self.heads,head)
+						end
+					end
+				end
+				if #self.heads==0 then
+					self.action,self.timer="open eye",30
+				end
+			end,
+			draw=function(self)
+				for head in all(self.heads) do
+					local dist_x,dist_y=head.x-self.x,head.y-self.y
+					dist_x/=7 dist_y/=7
+					for i=1,head.segments_to_draw-1 do
+						_draw_ent{
+							x=self.x+dist_x*i,
+							y=self.y+dist_y*i,
+							spr=54,
+							--these have to exist.
+							invuln_time_left=0,white_until_t=0,
+						}
+					end
+				end
+				for head in all(self.heads) do
+					if(count(entities,head)>0)_draw_ent(head)
+				end
+			end,
+		},
 	}
 end
 
 --per level.
 ENEMY_PROBABILITIES={
-	--asteroid, +swaying, red, blue, ufo, red(shoot), blue(shoot).
+	--asteroid, +swaying, red, blue, ufo, red(shoot), blue(shoot), boss.
 	--checked left to right. must have a 1 (100% chance⁘). use -1 for 0% chance.
 	split"0.8,1", --just asteroids
 	split"0.4,0.8,1", --asteroids and reds
@@ -248,12 +414,13 @@ ENEMY_PROBABILITIES={
 	split"0.6,-1,0.7,0.8,-1,0.9,1", --asteroids, reds/blues (+shooting)
 	split"0.4,-1,-1,-1,0.5,0.75,1", --asteroids, shooting reds/blues, ufos
 	split"-1,-1,-1,-1,1", --oops all ufos
+	split"-1,-1,-1,-1,-1,-1,-1,1", --boss
 }
 --⁘ technically, 100% chance would be whatever number is immediately below 1.0
 --  in the 32-bit fixed-point numbering system that pico-8 uses, but it doesn't
 --  matter.
 for lvl,probs in pairs(ENEMY_PROBABILITIES) do
-	assert(#probs<=7,
+	assert(#probs<=8,
 		"too many probabilities for level "..lvl)
 	for i=#probs,1,-1 do
 		if probs[i]!=-1 then
@@ -303,7 +470,7 @@ function update_game()
 			end
 			if enemy_count==0 then
 				level_warp_t=t+WARP_LENGTH
-				add_score(level*100,jc.x,jc.y)
+				add_score(level*10,jc.x,jc.y)
 			end
 		elseif t==entity_spawn_t then
 			if level==LAST_LEVEL then
@@ -344,6 +511,7 @@ function update_game()
 				}))
 				if(enemy.init)enemy:init()
 				entity_spawn_t=t+10+flr(rnd(20))
+				log("spawned "..(enemy.__kind or enemy.kind))
 			end
 		end
 	end
@@ -354,11 +522,12 @@ function update_game()
 		ent.y+=ent.sy
 		if not ent.preserve_offscreen and ent_is_offscreen(ent) then
 			del(entities,ent)
+			log("deleted offscreen "..(ent.__kind or ent.kind))
 		end
 	end
 	for ent in all(entities) do
 		ent.invuln_time_left=max(ent.invuln_time_left-1,0)
-		if ent.kind=="enemy" and ent.invuln_time_left==0 then
+		if ent.kind=="enemy" and ent.invuln_time_left==0 and not ent.ignore_damage then
 			for pshot in all(entities) do
 				if pshot.kind=="pshot" and entcol(ent,pshot) then
 					del(entities,pshot)
@@ -366,16 +535,33 @@ function update_game()
 					ent.hp-=1
 					if ent.hp>0 then
 						ent.white_until_t=t+2
+						if ent.invuln_time_on_hit then
+							ent.invuln_time_left=ent.invuln_time_on_hit
+						end
 					else
 						add_score(ent.score or 1,ent.x,ent.y)
 						del(entities,ent)
 						explode_at(ent.x,ent.y)
+						if ent==boss then
+							boss,star_color_override=nil
+						end
 					end
 					goto next_ent
 				end
 			end
 			if entcol(ent,jc) then
 				add_score(-100,jc.x,jc.y)
+				if boss then
+					add_popup("+5🐱",jc.x,jc.y)
+					boss.hp=min(boss.hp+5,boss.max_hp)
+				else
+					add_popup("+5⧗",jc.x,jc.y)
+					level_soft_end_t=max(level_soft_end_t,t)
+					level_soft_end_t=min(level_soft_end_t+5*30,t+20*30)
+					if entity_spawn_t<=t then
+						entity_spawn_t=t+30
+					end
+				end
 				jc.invuln_time_left=30
 				explode_at(jc.x,jc.y,10)
 			end
@@ -399,17 +585,30 @@ function draw_game()
 
 	--hud
 	print(_get_score_text(), 0,0, 7)
+	--the spaces after symbols are to save tokens in my implementation.
 	if t<=level_warp_t then
 		local level_text="level "..level+1
 		print_center(level_text,60)
+	elseif level==LAST_LEVEL-1 then
+		print_right(
+			boss and boss.hp.."🐱 " or "",
+			0
+		)
+	elseif t<level_soft_end_t then
+		print_right(
+			ceil((level_soft_end_t-t)/30).."⧗ ",
+			0
+		)
 	elseif t>=level_soft_end_t and level!=LAST_LEVEL then
-		local warp_text="clear all to warp"
-		print(warp_text, 128-#warp_text*4,0)
+		print_right("clear all to warp",0)
 	end
 
 	--entities
-	foreach(entities,_draw_ent)
-	_draw_ent(jc)
+	for ent in all(entities) do
+		_draw_ent(ent)
+		if(ent.draw)ent:draw()
+	end
+	_draw_ent(jc) --so it's on top
 
 	--vfx
 	for exp in all(explosions) do
@@ -466,7 +665,7 @@ function ending()
 end
 
 function _draw_ent(ent)
-	if(ent.spr<0)return
+	if(ent.spr==-1)return
 	if (ent.invuln_time_left>0 and t%2==0) or ent.white_until_t>=t then
 		--flashing effect
 		for c=0,15 do pal(c,7) end
@@ -474,7 +673,30 @@ function _draw_ent(ent)
 		pal(ent.pal)
 	end
 	palt(ent.palt or 0b1000000000000000)
-	spr(ent.spr, ent.x-4,ent.y-4, 1,1, ent.flip_x,ent.flip_y)
+	local draw=function(x,y,flip_x,flip_y)
+		spr(ent.spr,
+			ent.x-4+x,ent.y-4+y,
+			1,1,
+			flip_x,flip_y)
+	end
+	local layout=ent.spr_layout
+	if layout then
+		if layout=="1x2" then
+			draw(-4,0)
+			draw(4,0,true)
+		elseif layout=="2x2" then
+			draw(-4,-4)
+			draw(4,-4,true)
+			if(ent.spr_layout_use_next_for_lower)ent.spr+=1
+			draw(-4,4,false,true)
+			draw(4,4,true,true)
+			if(ent.spr_layout_use_next_for_lower)ent.spr-=1
+		else
+			assert(false,"unknown sprite layout: "..layout)
+		end
+	else
+		draw(0,0,ent.flip_x,ent.flip_y)
+	end
 end
 
 function _draw_kolob()
@@ -518,31 +740,41 @@ end
 --entity stuff
 
 function add_entity(props)
-	return copy_to(add(entities,{
+	return add(entities,make_entity(props))
+end
+function make_entity(props)
+	return copy_to({
 		x=0,y=0,
 		sx=0,sy=0,
 		spr=0,
 		hp=0,
 		invuln_time_left=0, white_until_t=0,
-	}),props)
+	},props)
 end
 
-function shoot(x,y,direction)
+function shoot(x,y,direction,is_fire)
 	SHOT_PAL_ANIM={
 		0b1011111111111111,
 		0b1101111111111111,
 		0b1001111111111111,
 	}
+	FIRE_SPR_ANIM={55,56}
+	local speed=is_fire and 3 or 1.5
 	add_entity{
 		kind="enemy",
 		x=x, y=y,
-		spr=37, pal={8,8},
+		spr=37, pal=not is_fire and {8,8},
+		hp=is_fire and 2 or 1,
 		score=0,
 		direction=direction,
 		update=function(self)
-			self.x+=self.direction[1]*1.5
-			self.y+=self.direction[2]*1.5
-			self.palt=SHOT_PAL_ANIM[t\2%3+1]
+			self.x+=self.direction[1]*speed
+			self.y+=self.direction[2]*speed
+			if is_fire then
+				self.spr=FIRE_SPR_ANIM[t\2%2+1]
+			else
+				self.palt=SHOT_PAL_ANIM[t\2%3+1]
+			end
 		end,
 	}
 end
@@ -599,7 +831,7 @@ function draw_stars(keep_still)
 		line(
 			star.x, flr(star.y)>old_y and old_y+1 or star.y,
 			star.x, star.y,
-			star.c
+			star_color_override and star_color_override[star.c] or star.c
 		)
 		while star.y>star_spawn_y+128 do
 			star.y-=128
@@ -607,7 +839,7 @@ function draw_stars(keep_still)
 			line(
 				star.x, star_spawn_y,
 				star.x, star.y,
-				star.c
+				star_color_override and star_color_override[star.c] or star.c
 			)
 		end
 	end
@@ -624,19 +856,30 @@ function add_score(addition,popup_x,popup_y)
 	--addition can be negative.
 	--see SCORE_SHIFT for an explanation of the shift.
 	score=max(score+(addition>>SCORE_SHIFT),0)
-	add(popups,{
-		x=popup_x, y=popup_y,
-		timer=30,
-		msg=addition..(addition==0 and "" or "0"),
-	})
+	add_popup(addition==0 and addition or addition.."0", popup_x,popup_y)
+end
+
+function add_popup(msg,x,y)
+	::look_for_an_overlap::
+	for popup in all(popups) do
+		if popup.x==x and popup.y==y then
+			y-=8
+			goto look_for_an_overlap
+		end
+	end
+	add(popups,{x=x,y=y,msg=msg,timer=30})
 end
 
 -->8
 --util
 
---doesn't handle full-width chars (i.e., 8px wide instead of 4px).
+--these don't handle 8px wide chars (instead of the normal 4px), such as
+--symbols. if you have one at the end, just put a space after it.
 function print_center(s,...)
 	print(s,64-#s*2,...)
+end
+function print_right(s,...)
+	print(s,128-#s*4,...)
 end
 
 function lerp(from,to,amt)
@@ -680,11 +923,19 @@ __gfx__
 07777770505555050000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 77777777d055550d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 7777777700d00d000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00555500000055500090090000900900000660000001100000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00544550055554550898898008988980006666000110011000000000000000000000000000000000000000000000000000000000000000000000000000000000
-05544450554444450888888008888880006116000102201000000000000000000000000000000000000000000000000000000000000000000000000000000000
-05544450544444450828828008288280066116601022220100000000000000000000000000000000000000000000000000000000000000000000000000000000
-55444455544444450888888008888880055665501022220100000000000000000000000000000000000000000000000000000000000000000000000000000000
-55444445555544550082280000822800666556660102201000000000000000000000000000000000000000000000000000000000000000000000000000000000
-05544455005555500888888008888880566666650110011000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00555550000055008008800808800880001551000001100000000000000000000000000000000000000000000000000000000000000000000000000000000000
+005555000000555000900900009009000006600000011000f9ffff9fffffffffffffffffff9fffff005025000050250000000000000000000000000000000000
+005445500555545508988980089889800066660001100110f992299fff9229ffff8888ffff99ffff002222200022222000000000000000000000000000000000
+055444505544444508888880088888800061160001022010f298892ff208802ff872278f8899ffff522222225222222200000000000000000000000000000000
+05544450544444450828828008288280066116601022220128088082287887822270072228088fff522222225222222200000000000000000000000000000000
+5544445554444445088888800888888005566550102222012888888222722722200000022888888f022222220222222200000000000000000000000000000000
+55444445555544550082280000822800666556660102201028788782200000022000000228888788002222550022225500000000000000000000000000000000
+055444550055555008888880088888805666666501100110f272272ff200002ff200002f2227272f02222555022225e800000000000000000000000000000000
+005555500000550080088008088008800015510000011000ff2222ffff2222ffff2222ffff2222ff5222255552222e8800000000000000000000000000000000
+00000000000000000000000000000000000000000000000000022000009099000000900000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000228822009a9aa90090a900000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000288882099a9aa90999a999000000000000000000000000000000000000000000000000000000000
+000000000000000000000000000000000000000000000000288888829aa9a99999a9aa9900000000000000000000000000000000000000000000000000000000
+000000000000000000000000000000000000000000000000288888829aaaa999999aaa9900000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000288882099aa99a0999aaa9000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000228822009999a900999999000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000022000009999000099990000000000000000000000000000000000000000000000000000000000
