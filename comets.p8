@@ -16,9 +16,6 @@ function _init()
 
 	enemies_setup()
 
-	--skip intro
-	t=0 init_game() do return end
-
 	_update,_draw=intro
 	t,entities,stars,star_spawn_y,star_speed_scale,kolob=0,{},{},-300-64,1
 	generate_stars()
@@ -35,6 +32,12 @@ function _init()
 end
 
 function intro()
+	for i=1,ox(btn) and 5 or 1 do
+		_intro()
+	end
+end
+
+function _intro()
 	t+=1
 	camera(0,jc.y-65)
 	if t>380 then
@@ -77,10 +80,16 @@ function intro()
 		print("jesus:", 16,0, 0)
 		print("i go to him who sent me.")
 	end
+
+	if t<=45 then
+		camera()
+		print("\#7hold 🅾️/❎ to skip", 8,120, 0)
+	end
 end
 
 function init_game()
-	_update,_draw,score,level=update_game,draw_game,0,7
+	--level gets immediately incremented before we start.
+	_update,_draw,score,level=update_game,draw_game,0,0
 	local star_spawn_offset=0-(star_spawn_y or 0)
 	star_spawn_y=0
 	if stars then
@@ -102,10 +111,9 @@ end
 function init_next_level()
 	level+=1
 	star_speed_scale=1
-	--todo: change level_soft_end_t to 30*20 (20secs) in the default case.
 	level_warp_t, level_soft_end_t,entity_spawn_t, no_shoot_until_t=
 		0,
-		t+(level==LAST_LEVEL-1 and 91 or 30*5), t+90,
+		t+(level==LAST_LEVEL-1 and 91 or 30*20), t+90,
 		0
 end
 
@@ -442,8 +450,8 @@ function update_game()
 	if(btn(⬆️))jc.sy-=2
 	if(btn(⬇️))jc.sy+=2
 	if
-		((btn(🅾️) or btn(❎)) and no_shoot_until_t<=t)
-		or btnp(🅾️) or btnp(❎)
+		ox(btn) and no_shoot_until_t<=t
+		or ox(btnp)
 	then
 		add_entity{
 			kind="pshot",
@@ -733,7 +741,11 @@ end
 function _press_to(what)
 	print_center("press anything",84)
 	print_center("to "..what,92)
-	return btnp(🅾️) or btnp(❎)
+	return ox(btnp)
+end
+
+function ox(btn_or_btnp)
+	return btn_or_btnp(🅾️) or btn_or_btnp(❎)
 end
 
 -->8
