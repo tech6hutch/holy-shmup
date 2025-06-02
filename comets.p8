@@ -31,6 +31,9 @@ function title_screen()
 	print(hard_mode and "  normal mode" or "> normal mode",34,76)
 	print(hard_mode and "> hard mode" or "  hard mode")
 	if ox(btnp) then
+		ox_was_pressed=true
+	end
+	if ox_was_pressed and not ox(btn) then
 		init_intro()
 	end
 end
@@ -92,12 +95,16 @@ function _intro()
 	foreach(entities,_draw_ent)
 	if t>=320 then
 	elseif t>=210 then
+		--slightly hacky way to skip thru the dialog faster.
+		if(ox(btn))t+=2
 		print("jesus:", 16,0, 0)
 		print("you can't follow me now,\nbut someday.")
 	elseif t>=120 then
+		if(ox(btn))t+=2
 		print("peter:", 26,40, 0)
 		print("we will follow you.")
 	elseif t>=30 then
+		if(ox(btn))t+=2
 		print("jesus:", 16,0, 0)
 		print("i go to him who sent me.")
 	end
