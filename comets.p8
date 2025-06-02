@@ -15,7 +15,27 @@ function _init()
 	poke(0x5f36,0x40)
 
 	enemies_setup()
+	_update,_draw=title_screen
+	hard_mode=false
+end
 
+function title_screen()
+	cls(1)
+	print_center("holy shmup",52)
+	if btnp(⬆️) then
+		hard_mode=false
+	end
+	if btnp(⬇️) then
+		hard_mode=true
+	end
+	print(hard_mode and "  normal mode" or "> normal mode",34,76)
+	print(hard_mode and "> hard mode" or "  hard mode")
+	if ox(btnp) then
+		init_intro()
+	end
+end
+
+function init_intro()
 	_update,_draw=intro
 	t,entities,stars,star_spawn_y,star_speed_scale,kolob=0,{},{},-300-64,1
 	generate_stars()
@@ -33,7 +53,8 @@ end
 
 function intro()
 	for i=1,ox(btn) and 5 or 1 do
-		_intro()
+		--bugfix for if the intro ends, but we keep running it, messing up the camera.
+		if(_update==intro)_intro()
 	end
 end
 
@@ -518,6 +539,11 @@ function update_game()
 					y=-8,
 				}))
 				if(enemy.init)enemy:init()
+				if hard_mode then
+					if(enemy.score)enemy.score*=2
+					enemy.hp=(enemy.hp or 1)+(boss and 10 or 1)
+					if(enemy.max_hp)enemy.max_hp=enemy.hp
+				end
 				entity_spawn_t=t+10+flr(rnd(20))
 				log("spawned "..(enemy.__kind or enemy.kind))
 			end
@@ -547,7 +573,7 @@ function update_game()
 							ent.invuln_time_left=ent.invuln_time_on_hit
 						end
 					else
-						add_score(ent.score or 1,ent.x,ent.y)
+						add_score(ent.score or (hard_mode and 2 or 1),ent.x,ent.y)
 						del(entities,ent)
 						explode_at(ent.x,ent.y)
 						if ent==boss then
@@ -558,16 +584,28 @@ function update_game()
 				end
 			end
 			if entcol(ent,jc) then
-				add_score(-100,jc.x,jc.y)
-				if boss then
-					add_popup("+5🐱",jc.x,jc.y)
-					boss.hp=min(boss.hp+5,boss.max_hp)
+				if hard_mode then
+					add_popup"score loss"
+					score=0
+					if boss then
+						add_popup"full🐱"
+						boss.hp=boss.max_hp
+					else
+						add_popup"full⧗"
+						level_soft_end_t=t+20*30
+					end
 				else
-					add_popup("+5⧗",jc.x,jc.y)
-					level_soft_end_t=max(level_soft_end_t,t)
-					level_soft_end_t=min(level_soft_end_t+5*30,t+20*30)
-					if entity_spawn_t<=t then
-						entity_spawn_t=t+30
+					add_score(-100,jc.x,jc.y)
+					if boss then
+						add_popup"+5🐱"
+						boss.hp=min(boss.hp+5,boss.max_hp)
+					else
+						add_popup"+5⧗"
+						level_soft_end_t=max(level_soft_end_t,t)
+						level_soft_end_t=min(level_soft_end_t+5*30,t+20*30)
+						if entity_spawn_t<=t then
+							entity_spawn_t=t+30
+						end
 					end
 				end
 				jc.invuln_time_left=30
@@ -594,7 +632,9 @@ function draw_game()
 	--hud
 	print(_get_score_text(), 0,0, 7)
 	--the spaces after symbols are to save tokens in my implementation.
-	if t<=level_warp_t then
+	if level==LAST_LEVEL then
+		--no need to print anything in the upper right
+	elseif t<=level_warp_t then
 		local level_text="level "..level+1
 		print_center(level_text,60)
 	elseif level==LAST_LEVEL-1 then
@@ -607,7 +647,7 @@ function draw_game()
 			ceil((level_soft_end_t-t)/30).."⧗ ",
 			0
 		)
-	elseif t>=level_soft_end_t and level!=LAST_LEVEL then
+	elseif t>=level_soft_end_t then
 		print_right("clear all to warp",0)
 	end
 
@@ -772,11 +812,14 @@ function shoot(x,y,direction,is_fire)
 	}
 	FIRE_SPR_ANIM={55,56}
 	local speed=is_fire and 3 or 1.5
+	local hp=1
+	if(is_fire)hp+=1
+	if(hard_mode)hp+=1
 	add_entity{
 		kind="enemy",
 		x=x, y=y,
 		spr=37, pal=not is_fire and {8,8},
-		hp=is_fire and 2 or 1,
+		hp=hp,
 		score=0,
 		direction=direction,
 		update=function(self)
@@ -872,6 +915,7 @@ function add_score(addition,popup_x,popup_y)
 end
 
 function add_popup(msg,x,y)
+	x,y=x or jc.x,y or jc.y
 	::look_for_an_overlap::
 	for popup in all(popups) do
 		if popup.x==x and popup.y==y then
