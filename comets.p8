@@ -117,7 +117,7 @@ end
 
 function init_game()
 	--level gets immediately incremented before we start.
-	_update,_draw,score,level=update_game,draw_game,0,8
+	_update,_draw,score,level=update_game,draw_game,0,0
 	local star_spawn_offset=0-(star_spawn_y or 0)
 	star_spawn_y=0
 	if stars then
@@ -277,6 +277,7 @@ function enemies_setup()
 			__kind="boss",
 			spr=42, spr_layout="2x2",
 			hp=20, max_hp=20,
+			hard_mode_hp=66,
 			score=50,
 			invuln_time_on_hit=5,
 			ignore_damage=true,
@@ -555,7 +556,11 @@ function update_game()
 				if(enemy.init)enemy:init()
 				if hard_mode then
 					if(enemy.score)enemy.score*=2
-					enemy.hp=(enemy.hp or 1)+(boss and 10 or 1)
+					if enemy.hard_mode_hp then
+						enemy.hp=enemy.hard_mode_hp
+					else
+						enemy.hp=(enemy.hp or 1)+1
+					end
 					if(enemy.max_hp)enemy.max_hp=enemy.hp
 				end
 				entity_spawn_t=t+10+flr(rnd(20))
