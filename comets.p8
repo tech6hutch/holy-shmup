@@ -1,6 +1,8 @@
 pico-8 cartridge // http://www.pico-8.com
 version 42
 __lua__
+--build command: export -i 16 -c 0 holy_shmup.bin
+
 --numbers only have 16 bits for the integer part, but shifting the value right
 --by 16 lets us also use the remaining bits, intended for the decimal part. This
 --gives us a total of 32 bits for storing our (signed) integer.
